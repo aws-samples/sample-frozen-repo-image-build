@@ -48,20 +48,31 @@ The directory path is the configuration: each leaf includes `root.hcl` (provider
 
 ## Prerequisites
 
-- Terraform >= 1.5 and Terragrunt.
-- A container engine: Finch (default) or Docker.
-- `python3` + `pip` on the deploy machine (`make distribution` vendors Lambda pip dependencies via `make lambda-deps`; without it the functions fail at import time).
-- Two AWS accounts: a connected Distribution account and an air-gapped Workload account.
-- **Distribution account networking** (fails at RUNTIME, not at apply, when missing):
-  - Private subnets with internet egress that works **without public IPs** (NAT gateway or equivalent). VPC-attached Lambdas never get public IPs and the sync task runs with `assignPublicIp` disabled, so an internet gateway alone is not enough.
-  - The security group in `distribution_security_group_id` must allow **egress on 443** (AWS APIs + public package mirrors; mirror CDNs have no stable CIDR to scope to).
-  - VPC DNS must resolve **public names** (Amazon-provided resolver or a forwarding resolver). A DHCP options set pointing at an unreachable resolver breaks every AWS call with `Could not connect to the endpoint URL`.
-- **Workload account networking** (also fails at RUNTIME): the security groups in `workload_security_group_ids` (used by the Image Builder build instance) must allow **egress on 443** to the VPC CIDR (SSM/logs/KMS interface endpoints + the mirror ALB) and to the S3 managed prefix list (component downloads and log upload via the gateway endpoint). Without the SSM path the build instance never registers and the pipeline fails at `LaunchBuildInstance` with `ssm:SendCommand InvalidInstanceId`. A truly air-gapped VPC must provide ALL the service paths as VPC endpoints: interface endpoints for `ssm`, `ssmmessages`, `ec2messages` (instance registration + Session Manager), `logs`, `kms`, and `imagebuilder`, plus the S3 **gateway** endpoint. The `imagebuilder` one is the easiest to miss: AWSTOE on the build instance calls `GetComponent` on the Image Builder API to fetch component documents, and without the endpoint the build fails at `ApplyBuildComponents` with `dial tcp ...: i/o timeout`.
-- A `FrozenRepoDeploymentRole` in each account, assumable by your deploy identity, or leave `deploy_role_name` empty to use each profile's ambient credentials.
-- The Terraform state backend is created by `make bootstrap`: state bucket in the Distribution account, a lock table in EACH account (the S3 backend addresses the table by name, resolved in the caller's account), and a least-privilege cross-account bucket policy for the Workload deploy identity.
-- Do NOT pre-create the ECR repositories; the `sync-engine` and `mirror` units own them. Images push after those units apply.
-- **Mirror TLS trust** (runtime prerequisite): the Image Builder build instance and the fleet verify the mirror's HTTPS certificate with default TLS verification. Preferred: the parent AMI already trusts the CA that issued `mirror_acm_cert_arn`'s certificate (private CA anchor baked upstream). Failsafe: set `mirror_ca_cert_file` in `config.hcl` to the certificate's PEM and the bake installs the trust anchor before its first dnf call, baking it into the AMI so runtime dnf and SSM patching verify TLS too (this is also the path for a self-signed test certificate).
-- An ACM certificate (private CA or imported) and a private hosted zone for the internal mirror hostname.
+Work through these in order. Steps 1-3 are your machine; 4-6 are account networking (missing pieces fail at RUNTIME, not at apply); 7 is optional.
+
+1. **Two AWS accounts**: a connected Distribution account and an air-gapped Workload account.
+2. **Tools on the deploy machine**: Terraform >= 1.5, Terragrunt, a container engine (Finch, the default, or Docker), and `python3` + `pip` (`make distribution` vendors Lambda pip dependencies via `make lambda-deps`; without it the functions fail at import time).
+3. **AWS CLI with one named profile per account**; you pass them to every `make` target as `DIST_PROFILE` and `WORK_PROFILE`.
+4. **Distribution account networking**:
+   - Private subnets whose internet egress works **without public IPs** (NAT gateway or equivalent). VPC-attached Lambdas never get public IPs and the sync task runs with `assignPublicIp` disabled, so an internet gateway alone is not enough.
+   - The security group in `distribution_security_group_id` allows **egress on 443** (AWS APIs + public package mirrors; mirror CDNs have no stable CIDR to scope to).
+   - VPC DNS resolves **public names** (Amazon-provided resolver or a forwarding resolver).
+5. **Workload account networking**:
+   - VPC **interface endpoints** for `ssm`, `ssmmessages`, `ec2messages`, `logs`, `kms`, and `imagebuilder`, plus the S3 **gateway** endpoint. All six are required in a truly air-gapped VPC; `imagebuilder` is the easiest to miss.
+   - The security groups in `workload_security_group_ids` (used by the Image Builder build instance) allow **egress on 443** to the VPC CIDR (the endpoints + the mirror ALB) and to the S3 managed prefix list (component downloads and log upload).
+6. **Mirror hostname**: an ACM certificate (private CA or imported) and a private hosted zone for the internal mirror name. The build instance and the fleet verify the mirror's certificate with default TLS verification, so the CA must be trusted: preferably the parent AMI already trusts it (corporate root baked upstream); otherwise set `mirror_ca_cert_file` in `config.hcl` to the certificate's PEM and the bake installs the trust anchor before its first dnf call (also the path for a self-signed test certificate).
+7. **Optional**: a `FrozenRepoDeploymentRole` in each account, assumable by your deploy identity. Leave `deploy_role_name` empty to use each profile's ambient credentials instead.
+
+That is everything you pre-create. The Terraform state backend is created by `make bootstrap` (state bucket in the Distribution account, a lock table in EACH account, and a least-privilege cross-account bucket policy for the Workload deploy identity), and the ECR repositories are owned by the `sync-engine` and `mirror` units — do NOT pre-create them; images push after those units apply.
+
+Missing networking shows up as one of these runtime failures:
+
+| Symptom | Missing prerequisite |
+|---|---|
+| Every AWS call fails with `Could not connect to the endpoint URL` | Public DNS resolution (step 4), e.g. a DHCP options set pointing at an unreachable resolver |
+| Pipeline fails at `LaunchBuildInstance` with `ssm:SendCommand InvalidInstanceId` | The SSM endpoint path or SG egress to it (step 5); the build instance never registered |
+| Build fails at `ApplyBuildComponents` with `dial tcp ...: i/o timeout` | The `imagebuilder` interface endpoint (step 5); AWSTOE cannot call `GetComponent` |
+| Bake fails at `ValidateFrozenRepo` with a TLS/certificate error | Mirror CA trust (step 6); set `mirror_ca_cert_file` or bake the CA into the parent |
 
 ## Configure
 
