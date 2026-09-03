@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="872" height="520" viewBox="0 0 872 520" font-family="'Segoe UI',Helvetica,Arial,sans-serif">
+  <defs>
+    <style>
+      .bucket { fill:#1b2b3a; }
+      .bkt-txt { fill:#ffffff; font-size:15px; font-weight:600; }
+      .bkt-sub { fill:#8fb0c9; font-size:11px; }
+      .folder { fill:#e8f1fb; stroke:#3a7bd5; stroke-width:1.2; }
+      .file   { fill:#fff6e6; stroke:#e08a1e; stroke-width:1.2; }
+      .leaf   { fill:#eef7ee; stroke:#3b8f45; stroke-width:1.2; }
+      .name   { font-size:13px; fill:#1a1a1a; font-weight:600; }
+      .mono   { font-family:'SF Mono',Menlo,Consolas,monospace; font-size:12px; fill:#1a1a1a; }
+      .cmt    { font-size:11px; fill:#6b6b6b; font-style:italic; }
+      .tag    { font-size:10px; font-weight:600; }
+      .line   { stroke:#9bb4c9; stroke-width:1.4; fill:none; }
+      .icon   { font-size:13px; }
+    </style>
+  </defs>
+
+  <!-- Bucket header -->
+  <rect x="20" y="18" width="820" height="52" rx="8" class="bucket"/>
+  <text x="40" y="42" class="bkt-txt">&#128230;  s3://amzn-s3-demo-frozen-os-repos/</text>
+  <text x="40" y="60" class="bkt-sub">Amazon S3 frozen package repository — immutable, version-pinned, GPG-verified, KMS-encrypted, versioned</text>
+
+  <!-- vertical spine -->
+  <path class="line" d="M55 70 L55 470"/>
+
+  <!-- manifest.json -->
+  <path class="line" d="M55 108 L86 108"/>
+  <rect x="86" y="92" width="300" height="34" rx="6" class="file"/>
+  <text x="98" y="113" class="mono">&#128196; manifest.json</text>
+  <text x="400" y="113" class="cmt">NEVRA of every frozen package (the audit baseline)</text>
+
+  <!-- manifests/ -->
+  <path class="line" d="M55 156 L86 156"/>
+  <rect x="86" y="140" width="300" height="34" rx="6" class="file"/>
+  <text x="98" y="161" class="mono">&#128193; manifests/manifest-&lt;UTC-ts&gt;.json</text>
+  <text x="400" y="161" class="cmt">archived manifests for rollback</text>
+
+  <!-- rhel810/ -->
+  <path class="line" d="M55 204 L86 204"/>
+  <rect x="86" y="188" width="150" height="34" rx="6" class="folder"/>
+  <text x="98" y="209" class="mono">&#128193; rhel810/</text>
+  <text x="250" y="209" class="cmt">pinned OS minor</text>
+
+  <!-- rhel810 children spine -->
+  <path class="line" d="M120 222 L120 350"/>
+
+  <path class="line" d="M120 250 L150 250"/>
+  <rect x="150" y="234" width="300" height="32" rx="6" class="leaf"/>
+  <text x="162" y="254" class="mono">baseos/{Packages/, repodata/}</text>
+
+  <path class="line" d="M120 292 L150 292"/>
+  <rect x="150" y="276" width="300" height="32" rx="6" class="leaf"/>
+  <text x="162" y="296" class="mono">appstream/{Packages/, repodata/}</text>
+
+  <path class="line" d="M120 334 L150 334"/>
+  <rect x="150" y="318" width="300" height="32" rx="6" class="leaf"/>
+  <text x="162" y="338" class="mono">epel/{Packages/, repodata/}</text>
+
+  <!-- rhel79/ -->
+  <path class="line" d="M55 384 L86 384"/>
+  <rect x="86" y="368" width="330" height="34" rx="6" class="folder"/>
+  <text x="98" y="389" class="mono">&#128193; rhel79/{base, updates, epel}/...</text>
+  <text x="430" y="389" class="cmt">another pinned OS minor</text>
+
+  <!-- ... one prefix per pinned OS -->
+  <path class="line" d="M55 432 L86 432"/>
+  <rect x="86" y="416" width="150" height="34" rx="6" class="folder" stroke-dasharray="4 3"/>
+  <text x="120" y="437" class="mono">...</text>
+  <text x="250" y="437" class="cmt">one prefix per pinned OS version</text>
+
+  <!-- legend -->
+  <rect x="470" y="240" width="378" height="140" rx="8" fill="#f7f9fb" stroke="#d5dee6" stroke-width="1"/>
+  <text x="486" y="262" class="name">Legend</text>
+  <rect x="486" y="274" width="16" height="14" rx="3" class="file"/>
+  <text x="510" y="286" class="mono" font-size="11">audit / manifest objects</text>
+  <rect x="486" y="298" width="16" height="14" rx="3" class="folder"/>
+  <text x="510" y="310" class="mono" font-size="11">one prefix per pinned OS minor</text>
+  <rect x="486" y="322" width="16" height="14" rx="3" class="leaf"/>
+  <text x="510" y="334" class="mono" font-size="11">repo component:</text>
+  <text x="510" y="348" class="mono" font-size="11">Packages/ grows, repodata/ replaced</text>
+  <text x="486" y="368" class="cmt">Each OS minor is frozen: it never gains a new version on its own.</text>
+</svg>

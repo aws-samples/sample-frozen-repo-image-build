@@ -1,0 +1,5 @@
+# Runtime dependencies for the detector Lambda.
+# defusedxml hardens XML parsing of untrusted upstream repo metadata against
+# XXE (external entity) and XML-bomb attacks. boto3 is provided by the Lambda
+# runtime and is intentionally not pinned here.
+defusedxml==0.7.1

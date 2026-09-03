@@ -1,0 +1,10 @@
+# Sample curated package list for the rhel810 frozen repo (one package per line).
+# Format accepted by validate_packages.sh: either name.arch or full NEVRA.
+# Also installed during the AMI bake from the frozen mirror when os_matrix sets
+# baked_packages_file to this file. Replace with the real packages your image installs.
+bash.x86_64
+coreutils.x86_64
+openssl.x86_64
+curl.x86_64
+vim-minimal.x86_64
+tree.x86_64

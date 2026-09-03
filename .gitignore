@@ -1,0 +1,28 @@
+# Terraform / Terragrunt generated
+.terraform/
+.terraform.lock.hcl
+.terragrunt-cache/
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Security scan output
+.ash/
+
+# Lambda build zips
+*.zip
+
+# Terragrunt render artifacts
+terragrunt.rendered.json
+.terragrunt-cache/
+
+# Python bytecode
+__pycache__/
+*.pyc
+.kiro/
+.DS_Store
+
+# Vendored Lambda pip dependencies (installed by `make lambda-deps`)
+lambdas/*/defusedxml/
+lambdas/*/*.dist-info/
+lambdas/*/bin/
