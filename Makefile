@@ -17,14 +17,17 @@ DIST_AWS      := $(if $(DIST_PROFILE),AWS_PROFILE=$(DIST_PROFILE),)
 WORK_AWS      := $(if $(WORK_PROFILE),AWS_PROFILE=$(WORK_PROFILE),)
 
 # Container image tags (must match the image_tag inputs in _env/sync-engine.hcl and _env/mirror.hcl).
-IMAGE_TAG     ?= v1.0.0
+IMAGE_TAG         ?= v1.0.0
+
+# Explicit acknowledgement required before the operator-authorized initial full sync.
+BASELINE_APPROVED ?= false
 
 # Container engine. Defaults to Finch (Docker-free). Override with CONTAINER=docker.
 CONTAINER     ?= finch
 
 .PHONY: help all plan plan-distribution plan-workload \
         bootstrap lambda-deps images image-sync image-mirror full-sync \
-        distribution workload seed check-config \
+        distribution workload seed check-config test \
         unit destroy-workload destroy-distribution
 
 CONFIG_FILE := $(ENV_DIR)/config.hcl
@@ -44,7 +47,8 @@ help:
 	@echo "  make distribution   run-all apply the Distribution account"
 	@echo "  make workload       run-all apply the Workload account"
 	@echo "  make images         build + push the sync and mirror images (amd64)"
-	@echo "  make full-sync      one-time initial mirror of every os_matrix repo (hours)"
+	@echo "  make full-sync BASELINE_APPROVED=true"
+	@echo "                       one-time operator-authorized initial mirror (hours)"
 	@echo "  make seed           invoke the detector once to baseline the manifest"
 	@echo ""
 	@echo "SINGLE UNIT (finest granularity):"
@@ -59,18 +63,19 @@ all: bootstrap distribution workload images full-sync seed
 	@echo "== Full deployment complete =="
 
 ## preflight: fail fast if config.hcl still holds template placeholders
-# Scans config.hcl (comments ignored) for the shipped sentinel ids (111111111111/222222222222, vpc-/subnet-/sg- 1111/2222, mock KMS ARNs, mock zone id) and errors if any remain.
-# Customizable-but-valid defaults (demo bucket name, approval email) are intentionally NOT flagged.
+# Scans active config.hcl lines for shipped sentinel account/network ids, mock
+# ARNs, the placeholder parent AMI, example domains/email/certificate, and the
+# non-unique demonstration bucket name. Any match blocks plan/apply.
 check-config:
 	@test -f "$(CONFIG_FILE)" || { echo "ERROR: $(CONFIG_FILE) not found."; exit 1; }
-	@if grep -vE '^\s*#' "$(CONFIG_FILE)" | grep -Eq '111111111111|222222222222|vpc-1111|vpc-2222|subnet-1111|subnet-2222|sg-1111|sg-2222|:key/mock|Z0000000000000000MOCK'; then \
+	@if grep -vE '^\s*#' "$(CONFIG_FILE)" | grep -Eq '111111111111|222222222222|vpc-1111|vpc-2222|subnet-1111|subnet-2222|sg-1111|sg-2222|:key/mock|Z0000000000000000MOCK|ami-00000000000000000|example\.com|amzn-s3-demo-frozen-os-repos|mock-cert'; then \
 	  echo ""; \
 	  echo "=============================================================="; \
 	  echo " ERROR: $(CONFIG_FILE) still contains template placeholders."; \
 	  echo " Fill in your real account ids, VPC/subnet/SG ids, and ARNs"; \
 	  echo " before running plan/apply. Offending lines:"; \
 	  echo "=============================================================="; \
-	  grep -nvE '^\s*#' "$(CONFIG_FILE)" | grep -E '111111111111|222222222222|vpc-1111|vpc-2222|subnet-1111|subnet-2222|sg-1111|sg-2222|:key/mock|Z0000000000000000MOCK'; \
+	  grep -nvE '^\s*#' "$(CONFIG_FILE)" | grep -E '111111111111|222222222222|vpc-1111|vpc-2222|subnet-1111|subnet-2222|sg-1111|sg-2222|:key/mock|Z0000000000000000MOCK|ami-00000000000000000|example\.com|amzn-s3-demo-frozen-os-repos|mock-cert'; \
 	  exit 1; \
 	fi
 	@echo "== config.hcl preflight OK (no template placeholders detected) =="
@@ -136,29 +141,61 @@ workload: check-config
 # One-time initial population: run the sync task in FULL_SYNC mode to mirror every os_matrix repo (download, GPG-verify, upload). Runs for HOURS and egresses tens of GB via the Distribution NAT.
 # Network values come from config.hcl and the sync-engine outputs (nothing hardcoded). Idempotent: re-running re-mirrors.
 full-sync: check-config
-	@echo "== initial full sync: mirror every os_matrix repo into the frozen bucket =="
-	@subnets=$$(sed -n 's/^ *distribution_subnet_ids *= *\[\(.*\)\].*/\1/p' $(CONFIG_FILE) | tr -d ' "'); \
+	@test "$(BASELINE_APPROVED)" = "true" || { \
+	  echo "ERROR: initial full sync establishes the operator-authorized baseline."; \
+	  echo "Review the configured repositories, then rerun with BASELINE_APPROVED=true."; \
+	  exit 1; \
+	}
+	@echo "== initial operator-authorized full sync: mirror every os_matrix repo into the frozen bucket =="
+	@set -e; \
+	subnets=$$(sed -n 's/^ *distribution_subnet_ids *= *\[\(.*\)\].*/\1/p' $(CONFIG_FILE) | tr -d ' "'); \
 	sg=$$(cd $(DIST_DIR)/us-east-1/sync-engine && $(DIST_AWS) $(TG) output -raw security_group_id 2>/dev/null); \
 	cluster=$$(cd $(DIST_DIR)/us-east-1/sync-engine && $(DIST_AWS) $(TG) output -raw cluster_name 2>/dev/null); \
 	family=$$(cd $(DIST_DIR)/us-east-1/sync-engine && $(DIST_AWS) $(TG) output -raw task_family 2>/dev/null); \
-	test -n "$$subnets" && test -n "$$sg" && test -n "$$cluster" || { echo "ERROR: could not resolve subnets/SG/cluster (is the Distribution account applied?)"; exit 1; }; \
+	test -n "$$subnets" && test -n "$$sg" && test -n "$$cluster" && test -n "$$family" || { echo "ERROR: could not resolve subnets/SG/cluster/task family (is the Distribution account applied?)"; exit 1; }; \
 	echo "   cluster=$$cluster subnets=$$subnets sg=$$sg"; \
-	$(DIST_AWS) aws ecs run-task \
+	task_arn=$$($(DIST_AWS) aws ecs run-task \
 	  --cluster "$$cluster" --task-definition "$$family" --launch-type FARGATE \
 	  --network-configuration "awsvpcConfiguration={subnets=[$$subnets],securityGroups=[$$sg],assignPublicIp=DISABLED}" \
-	  --overrides '{"containerOverrides":[{"name":"sync","environment":[{"name":"FULL_SYNC","value":"true"}]}]}' \
-	  --region us-east-1 --query 'tasks[0].taskArn' --output text
-	@echo "   Follow progress: task logs in /ecs/ log group; S3 objects appear per-repo after GPG verification."
+	  --overrides '{"containerOverrides":[{"name":"sync","environment":[{"name":"FULL_SYNC","value":"true"},{"name":"BASELINE_APPROVED","value":"true"}]}]}' \
+	  --region us-east-1 --query 'tasks[0].taskArn' --output text); \
+	case "$$task_arn" in ""|None) echo "ERROR: ECS did not start the full-sync task"; exit 1;; esac; \
+	echo "   task=$$task_arn"; \
+	echo "   waiting for the full-sync task to stop (this can take hours)..."; \
+	$(DIST_AWS) aws ecs wait tasks-stopped --cluster "$$cluster" --tasks "$$task_arn" --region us-east-1; \
+	exit_code=$$($(DIST_AWS) aws ecs describe-tasks --cluster "$$cluster" --tasks "$$task_arn" --region us-east-1 --query 'tasks[0].containers[?name==`sync`].exitCode | [0]' --output text); \
+	stopped_reason=$$($(DIST_AWS) aws ecs describe-tasks --cluster "$$cluster" --tasks "$$task_arn" --region us-east-1 --query 'tasks[0].stoppedReason' --output text); \
+	if [ "$$exit_code" != "0" ]; then \
+	  echo "ERROR: full-sync task failed (exit=$$exit_code, reason=$$stopped_reason, task=$$task_arn)"; \
+	  exit 1; \
+	fi; \
+	echo "== full sync completed successfully (task=$$task_arn) =="
 
 seed:
 	@echo "== seed the frozen repo (invoke the detector once; can run several minutes) =="
-	$(DIST_AWS) aws lambda invoke --function-name frozenrepo-package-detector \
-	    --cli-read-timeout 900 --region us-east-1 /dev/stdout || true
+	@set -e; \
+	function_name=$$(cd $(DIST_DIR)/us-east-1/detector-lambda && $(DIST_AWS) $(TG) output -raw function_name 2>/dev/null); \
+	test -n "$$function_name" || { echo "ERROR: could not resolve detector function name (is the Distribution account applied?)"; exit 1; }; \
+	response_file=$$(mktemp); \
+	trap 'rm -f "$$response_file"' EXIT; \
+	function_error=$$($(DIST_AWS) aws lambda invoke --function-name "$$function_name" \
+	  --cli-read-timeout 900 --region us-east-1 --query 'FunctionError' --output text "$$response_file"); \
+	cat "$$response_file"; \
+	if [ "$$function_error" != "None" ]; then \
+	  echo "ERROR: detector Lambda failed (FunctionError=$$function_error)"; \
+	  exit 1; \
+	fi
 
 ## single unit (finest granularity, review + apply one component)
 unit:
 	@test -n "$(DIR)" || { echo "usage: make unit DIR=environments/<Account>/<region>/<component>"; exit 1; }
 	cd $(DIR) && $(TG) plan && $(TG) apply
+
+## tests
+# Static and behavioral guards for security-critical sync invariants.
+test:
+	python3 -m unittest discover -s tests -p 'test_*.py'
+	bash -n containers/sync/sync.sh containers/mirror/entrypoint.sh scripts/bootstrap.sh
 
 ## teardown (reverse order: workload before distribution)
 destroy-workload:

@@ -34,7 +34,9 @@ inputs = {
   # Set mirror_create_vpc_endpoints = false in config.hcl when the workload
   # VPC already has the S3 gateway + KMS/ECR/Logs interface endpoints (only
   # one private-DNS interface endpoint per service per VPC is allowed).
-  create_vpc_endpoints = try(include.root.locals.cfg.mirror_create_vpc_endpoints, true)
+  create_vpc_endpoints       = try(include.root.locals.cfg.mirror_create_vpc_endpoints, true)
+  ecr_force_delete           = include.root.locals.cfg.mirror_ecr_force_delete
+  enable_deletion_protection = include.root.locals.cfg.mirror_enable_deletion_protection
 
   acm_certificate_arn = include.root.locals.cfg.mirror_acm_cert_arn
   mirror_hostname     = include.root.locals.cfg.mirror_hostname

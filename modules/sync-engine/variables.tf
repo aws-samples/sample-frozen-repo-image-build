@@ -24,6 +24,12 @@ variable "ecr_repo_name" {
   type        = string
 }
 
+variable "additional_ecr_pull_repository_arns" {
+  description = "Additional ECR repository ARNs the task execution role may pull from, such as the regional GuardDuty Runtime Monitoring agent repository."
+  type        = list(string)
+  default     = []
+}
+
 variable "image_tag" {
   description = "Image tag used by the task definition container."
   type        = string
@@ -97,12 +103,18 @@ variable "upstream_repos_map" {
   description = "Map of upstream mirror sources, serialized into the container as UPSTREAM_REPOS_MAP."
   type        = map(map(string))
   default = {
-    rhel810 = {
-      baseos    = "https://repo.example.com/8.10/BaseOS/x86_64/os/"
-      appstream = "https://repo.example.com/8.10/AppStream/x86_64/os/"
+    alma810 = {
+      baseos    = "https://repo.example.com/almalinux/8.10/BaseOS/x86_64/os/"
+      appstream = "https://repo.example.com/almalinux/8.10/AppStream/x86_64/os/"
       epel      = "https://epel.example.com/8/Everything/x86_64/"
     }
   }
+}
+
+variable "ecr_force_delete" {
+  description = "Whether Terraform may delete the sync ECR repository while it contains images. Keep false during normal operation."
+  type        = bool
+  default     = false
 }
 
 variable "tags" {

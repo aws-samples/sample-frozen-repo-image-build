@@ -94,7 +94,7 @@ EOF
 }
 
 # PKG_LISTS is a space-separated set of "list_file:os_prefix:repo1,repo2,..." entries.
-# Example: PKG_LISTS="/app/custom_packages810.txt:rhel810:baseos,appstream,epel"
+# Example: PKG_LISTS="/app/custom_packages_alma810.txt:alma810:baseos,appstream,epel"
 for entry in ${PKG_LISTS:-}; do
   IFS=':' read -r list osp repos <<< "$entry"
   validate_list "$list" "$osp" "$(echo "$repos" | tr ',' ' ')"

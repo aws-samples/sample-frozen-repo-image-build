@@ -85,9 +85,9 @@ variable "upstream_repos" {
   description = "Map of frozen OS -> (component -> upstream URL) the detector diffs against the manifest. Serialized into the Lambda as the UPSTREAM_REPOS env var and iterated as a dict by the handler. Derived from the central os_matrix (config.hcl), so it stays in lockstep with the sync engine's upstream_repos_map."
   type        = map(map(string))
   default = {
-    rhel810 = {
-      baseos    = "https://repo.example.com/8.10/BaseOS/x86_64/os/"
-      appstream = "https://repo.example.com/8.10/AppStream/x86_64/os/"
+    alma810 = {
+      baseos    = "https://repo.example.com/almalinux/8.10/BaseOS/x86_64/os/"
+      appstream = "https://repo.example.com/almalinux/8.10/AppStream/x86_64/os/"
       epel      = "https://epel.example.com/8/Everything/x86_64/"
     }
   }

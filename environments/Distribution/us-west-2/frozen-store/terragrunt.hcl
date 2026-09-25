@@ -11,7 +11,8 @@ include "env" {
 # Only account-specific values live here; module source, repo_matrix, and other
 # stable inputs come from _env/frozen-store.hcl.
 inputs = {
-  bucket_name = include.root.locals.cfg.frozen_bucket_name
+  bucket_name   = include.root.locals.cfg.frozen_bucket_name
+  force_destroy = include.root.locals.cfg.frozen_store_force_destroy
 
   # Workload account mirror task role (cross-account reader).
   mirror_task_role_arn = include.root.locals.cfg.mirror_task_role_arn

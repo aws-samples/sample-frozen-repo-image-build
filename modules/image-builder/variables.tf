@@ -19,7 +19,7 @@ variable "frozen_bucket_arn" {
 
 variable "images" {
   description = <<-EOT
-    Map of OS builds to produce, keyed by os_prefix (for example rhel810). One
+    Map of OS builds to produce, keyed by os_prefix (for example alma810). One
     Image Builder pipeline (component set, recipe, infra, distribution) is
     created per entry. Each value:
       parent_image : parent image ARN or AMI id the recipe builds from.

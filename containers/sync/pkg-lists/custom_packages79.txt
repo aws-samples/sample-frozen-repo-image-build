@@ -1,7 +1,0 @@
-# Sample curated package list for the rhel79 frozen repo (one package per line).
-# Format accepted by validate_packages.sh: either name.arch or full NEVRA.
-# Replace with the real packages your image installs.
-bash.x86_64
-coreutils.x86_64
-openssl.x86_64
-curl.x86_64

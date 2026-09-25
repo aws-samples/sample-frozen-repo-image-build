@@ -38,6 +38,59 @@ NS_REPO = {"repo": "http://linux.duke.edu/metadata/repo"}
 REPOS_TO_SCAN = json.loads(os.environ["REPOS_TO_SCAN"])
 
 
+def _require_successful_sync_event(event):
+    """Reject failed or incomplete ECS task-stop events before reading S3."""
+    source = event.get("source")
+    detail_type = event.get("detail-type")
+    if source is None and detail_type is None:
+        print("Manual invocation: rebuilding from current S3 state")
+        return
+    if source != "aws.ecs" or detail_type != "ECS Task State Change":
+        raise RuntimeError(
+            f"Unsupported invocation event: source={source!r}, detail-type={detail_type!r}"
+        )
+
+    detail = event.get("detail", {})
+    if detail.get("lastStatus") != "STOPPED":
+        raise RuntimeError(f"Unexpected ECS task status: {detail.get('lastStatus')!r}")
+
+    containers = detail.get("containers") or []
+    if not containers:
+        raise RuntimeError("ECS task-stop event contains no container exit codes")
+
+    sync_containers = [container for container in containers if container.get("name") == "sync"]
+    if len(sync_containers) != 1:
+        raise RuntimeError(
+            "ECS task-stop event must contain exactly one sync application container; "
+            f"found={[container.get('name', 'unknown') for container in containers]}"
+        )
+
+    sync_container = sync_containers[0]
+    exit_code = sync_container.get("exitCode")
+    if exit_code != 0:
+        raise RuntimeError(
+            "Sync task failed; manifest rebuild skipped: "
+            f"container={{'name': 'sync', 'exitCode': {exit_code!r}, "
+            f"'reason': {sync_container.get('reason', '')!r}}}, "
+            f"stoppedReason={detail.get('stoppedReason', '')!r}"
+        )
+
+    sidecar_failures = [
+        {
+            "name": container.get("name", "unknown"),
+            "exitCode": container.get("exitCode"),
+            "reason": container.get("reason", ""),
+        }
+        for container in containers
+        if container.get("name") != "sync" and container.get("exitCode") != 0
+    ]
+    if sidecar_failures:
+        print(
+            "  WARN: Ignoring non-sync sidecar failures after successful sync: "
+            f"{sidecar_failures}"
+        )
+
+
 def _get_primary_key(os_ver, repo_id):
     """Resolve the hash-prefixed primary.xml.gz/.xz key from repomd.xml in S3."""
     repomd_key = f"{os_ver}/{repo_id}/repodata/repomd.xml"
@@ -107,46 +160,55 @@ def _parse_packages(primary_key):
 
 def lambda_handler(event, context):
     print(f"Manifest update triggered. Event: {json.dumps(event, default=str)[:500]}")
+    _require_successful_sync_event(event)
 
     manifest = {}
     total = 0
+    errors = []
 
     for os_ver, repo_list in REPOS_TO_SCAN.items():
         manifest[os_ver] = {}
         for repo_id in repo_list:
-            primary_key = _get_primary_key(os_ver, repo_id)
-            if not primary_key:
-                print(f"  WARN: {os_ver}/{repo_id}: no repomd.xml or no primary entry")
-                manifest[os_ver][repo_id] = {}
-                continue
-
             try:
+                primary_key = _get_primary_key(os_ver, repo_id)
+                if not primary_key:
+                    raise RuntimeError("repomd.xml is missing or has no primary entry")
+
                 packages = _parse_packages(primary_key)
                 manifest[os_ver][repo_id] = packages
                 total += len(packages)
                 print(f"  {os_ver}/{repo_id}: {len(packages)} packages")
-            except Exception as e:
-                print(f"  ERROR: {os_ver}/{repo_id}: {e}")
-                manifest[os_ver][repo_id] = {}
+            except Exception as exc:
+                message = f"{os_ver}/{repo_id}: {exc}"
+                print(f"  ERROR: {message}")
+                errors.append(message)
 
-    # Archive existing manifest
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M")
+    if errors:
+        raise RuntimeError(
+            "Manifest rebuild aborted; the previous manifest remains active. "
+            + " | ".join(errors)
+        )
+
+    # Archive the existing manifest before replacing it. An archive failure is
+    # fatal because overwriting without an audit copy would break evidence history.
+    request_id = getattr(context, "aws_request_id", "manual")
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")
+    archive_key = f"manifests/manifest-{timestamp}-{request_id}.json"
     try:
         existing = s3.get_object(Bucket=S3_BUCKET, Key="manifest.json")
         s3.put_object(
             Bucket=S3_BUCKET,
-            Key=f"manifests/manifest-{timestamp}.json",
+            Key=archive_key,
             Body=existing["Body"].read(),
             ContentType="application/json",
             StorageClass="INTELLIGENT_TIERING",
         )
-        print(f"  Archived previous manifest to manifests/manifest-{timestamp}.json")
+        print(f"  Archived previous manifest to {archive_key}")
     except s3.exceptions.NoSuchKey:
         print("  No previous manifest to archive (first run)")
-    except Exception as e:
-        print(f"  WARN: Could not archive previous manifest: {e}")
+    except Exception as exc:
+        raise RuntimeError(f"Could not archive the previous manifest: {exc}") from exc
 
-    # Write new manifest
     manifest_body = json.dumps(manifest, separators=(",", ":")).encode()
     s3.put_object(
         Bucket=S3_BUCKET,

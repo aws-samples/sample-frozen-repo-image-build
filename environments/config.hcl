@@ -70,8 +70,19 @@ locals {
   # the bake installs the anchor before any dnf call and it is baked into the
   # AMI, so runtime dnf and SSM patching verify TLS too.
   mirror_ca_cert_file = ""
-  mirror_private_zone_id = "Z0000000000000000MOCK"
-  mirror_create_dns_record = true
+  mirror_private_zone_id     = "Z0000000000000000MOCK"
+  mirror_create_dns_record   = true
+  # Set false when this VPC already has the S3 gateway and KMS/ECR/Logs
+  # interface endpoints; private-DNS interface endpoints are unique per VPC.
+  mirror_create_vpc_endpoints = true
+
+  # ---- Teardown safety ------------------------------------------------------
+  # Keep these protections enabled during normal operation. The cleanup section
+  # in README.md explains the explicit apply-before-destroy sequence.
+  frozen_store_force_destroy          = false
+  sync_ecr_force_delete               = false
+  mirror_ecr_force_delete             = false
+  mirror_enable_deletion_protection   = true
 
   # ---- Image Builder (account/network wiring; per-OS build settings live in os_matrix) ----
   image_target_account_ids = [local.workload_account_id]
@@ -96,21 +107,23 @@ locals {
   #   repos       : component name -> upstream URL (fetched in the Distribution
   #                 account). The component NAMES also define the S3 prefixes and
   #                 the frozen mirror paths (<os>/<component>).
-  #   patch_os    : SSM operating_system (e.g. REDHAT_ENTERPRISE_LINUX).
-  #   patch_product : SSM patch source product string for this OS.
+  #   patch_os    : SSM operating_system (e.g. ALMA_LINUX or REDHAT_ENTERPRISE_LINUX).
+  #   patch_product : exact SSM patch source product string for this OS.
   #   gpg_keys    : component name -> gpg key filename under /etc/pki/rpm-gpg/.
   #   build_ami   : whether image-builder bakes a golden AMI for this OS.
   #   parent_image: parent AMI id for the recipe (required when build_ami = true).
   # =============================================================================
   os_matrix = {
-    rhel810 = {
+    alma810 = {
       repos = {
-        baseos    = "https://repo.example.com/8.10/BaseOS/x86_64/os/"
-        appstream = "https://repo.example.com/8.10/AppStream/x86_64/os/"
+        baseos    = "https://repo.example.com/almalinux/8.10/BaseOS/x86_64/os/"
+        appstream = "https://repo.example.com/almalinux/8.10/AppStream/x86_64/os/"
         epel      = "https://epel.example.com/8/Everything/x86_64/"
       }
-      patch_os      = "REDHAT_ENTERPRISE_LINUX"
-      patch_product = "RedhatEnterpriseLinux8.10"
+      patch_os      = "ALMA_LINUX"
+      # Verified with `aws ssm describe-patch-properties --operating-system
+      # ALMA_LINUX --property PRODUCT`; use the exact SSM product identifier.
+      patch_product = "AlmaLinux8.10"
       gpg_keys = {
         baseos    = "RPM-GPG-KEY-OS"
         appstream = "RPM-GPG-KEY-OS"
@@ -118,25 +131,29 @@ locals {
       }
       build_ami    = true
       # Same file validate_packages.sh checks after every sync: one source of truth.
-      baked_packages_file = "containers/sync/pkg-lists/custom_packages810.txt"
+      baked_packages_file = "containers/sync/pkg-lists/custom_packages_alma810.txt"
       parent_image = "ami-00000000000000000"
     }
-    rhel79 = {
-      repos = {
-        base    = "https://vault.example.com/7.9/os/x86_64/"
-        updates = "https://vault.example.com/7.9/updates/x86_64/"
-        epel    = "https://epel.example.com/7/x86_64/"
-      }
-      patch_os      = "REDHAT_ENTERPRISE_LINUX"
-      patch_product = "RedhatEnterpriseLinux7.9"
-      gpg_keys = {
-        base    = "RPM-GPG-KEY-OS"
-        updates = "RPM-GPG-KEY-OS"
-        epel    = "RPM-GPG-KEY-EPEL"
-      }
-      build_ami    = false
-      parent_image = ""
-    }
+
+    # Genuine RHEL subscription template (disabled). To use it, uncomment the
+    # block, provide a Red Hat parent AMI, expose entitled Red Hat repositories
+    # to the Distribution account, and add the Red Hat signing key to both the
+    # sync image and modules/image-builder/files. Never reuse AlmaLinux keys.
+    # rhel810 = {
+    #   repos = {
+    #     baseos    = "https://rhel-content.example.com/8.10/BaseOS/x86_64/os/"
+    #     appstream = "https://rhel-content.example.com/8.10/AppStream/x86_64/os/"
+    #   }
+    #   patch_os      = "REDHAT_ENTERPRISE_LINUX"
+    #   patch_product = "RedhatEnterpriseLinux8.10"
+    #   gpg_keys = {
+    #     baseos    = "RPM-GPG-KEY-redhat-release"
+    #     appstream = "RPM-GPG-KEY-redhat-release"
+    #   }
+    #   build_ami           = true
+    #   baked_packages_file = "containers/sync/pkg-lists/custom_packages_rhel810.txt"
+    #   parent_image        = "ami-00000000000000000"
+    # }
   }
 
   # ---- Derived views of os_matrix (components consume these; do not hand-edit) ----

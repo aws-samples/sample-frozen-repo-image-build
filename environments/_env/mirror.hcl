@@ -6,6 +6,6 @@ terraform {
 inputs = {
   mirror_ecr_repo_name = "frozenrepo/frozen-repo-mirror"
   task_family          = "frozenrepo-frozen-repo-mirror"
-  image_tag            = "v1.0.0"
+  image_tag            = "v1.1.0"
   desired_count        = 3
 }

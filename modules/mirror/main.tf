@@ -57,6 +57,7 @@ resource "aws_cloudwatch_log_group" "mirror" {
 resource "aws_ecr_repository" "mirror" {
   name                 = var.mirror_ecr_repo_name
   image_tag_mutability = "IMMUTABLE"
+  force_delete         = var.ecr_force_delete
 
   image_scanning_configuration {
     scan_on_push = true
@@ -341,7 +342,7 @@ resource "aws_lb" "mirror" {
   load_balancer_type         = "application"
   security_groups            = [aws_security_group.alb.id]
   subnets                    = var.subnet_ids
-  enable_deletion_protection = true
+  enable_deletion_protection = var.enable_deletion_protection
   drop_invalid_header_fields = true
 
   dynamic "access_logs" {

@@ -20,9 +20,11 @@ terragrunt.rendered.json
 __pycache__/
 *.pyc
 .kiro/
-.DS_Store
 
 # Vendored Lambda pip dependencies (installed by `make lambda-deps`)
 lambdas/*/defusedxml/
 lambdas/*/*.dist-info/
 lambdas/*/bin/
+
+# macOS Finder metadata
+.DS_Store

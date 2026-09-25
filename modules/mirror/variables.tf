@@ -113,6 +113,18 @@ variable "create_dns_record" {
   default     = false
 }
 
+variable "ecr_force_delete" {
+  description = "Whether Terraform may delete the mirror ECR repository while it contains images. Keep false during normal operation."
+  type        = bool
+  default     = false
+}
+
+variable "enable_deletion_protection" {
+  description = "Whether deletion protection is enabled on the internal mirror ALB. Keep true during normal operation."
+  type        = bool
+  default     = true
+}
+
 # Tagging
 variable "tags" {
   description = "Tags applied to all resources."

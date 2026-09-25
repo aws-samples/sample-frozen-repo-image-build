@@ -8,6 +8,14 @@ If you discover a potential security issue in this project, please notify AWS/Am
 
 This is a reference implementation. It is designed to be readable and to demonstrate a secure architectural pattern, and it is **not a drop-in production configuration**. Several settings are intentionally left in a reference-friendly state so the code deploys cleanly into a sample account. Before running this in production, review and apply the hardening steps below. Each item is a deliberate, disclosed trade-off, not an oversight.
 
+## Security invariants
+
+- **Approval artifacts fail closed.** A selective sync exits nonzero if it cannot retrieve the request's `approved.json`; it never falls back to a full sync.
+- **RPM signatures are mandatory.** A digest-only result is rejected. Any signature rejection blocks that repository's promotion.
+- **Initial baseline is explicit.** `FULL_SYNC=true` also requires `BASELINE_APPROVED=true`, and the Makefile requires the operator to acknowledge that the initial mirror is a deployment-authorized baseline rather than package-by-package approval.
+- **Frozen-store CMK is an authorization control.** Public RPM bytes are not secret; the customer-managed key is retained so the Distribution account can grant and revoke an independent, cross-account decrypt permission for the exact mirror role. The approval-token key remains separate and enforces split Encrypt/Decrypt duties.
+- **Object-level audit is separate.** KMS activity does not replace CloudTrail S3 data events or S3/ALB request logging.
+
 ## Production-hardening checklist (accepted security debt)
 
 ### 1. Approver review endpoint is publicly reachable (app-layer token auth)

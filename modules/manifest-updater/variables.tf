@@ -52,9 +52,9 @@ variable "tags" {
 }
 
 variable "reserved_concurrency" {
-  description = "Reserved concurrent executions for the Lambda function."
+  description = "Reserved concurrent executions for the manifest updater. Keep at 1 so manifest rebuilds and archive writes cannot overlap."
   type        = number
-  default     = 5
+  default     = 1
 }
 
 variable "lambda_source_dir" {
