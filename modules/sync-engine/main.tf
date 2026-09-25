@@ -42,6 +42,7 @@ resource "aws_cloudwatch_log_group" "sync" {
 resource "aws_ecr_repository" "sync" {
   name                 = var.ecr_repo_name
   image_tag_mutability = "IMMUTABLE"
+  force_delete         = var.ecr_force_delete
 
   image_scanning_configuration {
     scan_on_push = true
@@ -167,7 +168,10 @@ data "aws_iam_policy_document" "execution" {
       "ecr:GetDownloadUrlForLayer",
       "ecr:BatchGetImage"
     ]
-    resources = [aws_ecr_repository.sync.arn]
+    resources = concat(
+      [aws_ecr_repository.sync.arn],
+      var.additional_ecr_pull_repository_arns,
+    )
   }
 
   statement {

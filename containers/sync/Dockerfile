@@ -32,17 +32,13 @@ RUN curl -fsSL -o /tmp/awscli.zip https://awscli.amazonaws.com/awscli-exe-linux-
     && /tmp/aws/install \
     && rm -rf /tmp/aws /tmp/awscli.zip
 
-# GPG keys for the os_matrix families (rhel810 = AlmaLinux 8 + EPEL 8, rhel79 = CentOS 7 + EPEL 7).
+# GPG keys for the shipped alma810 sample (AlmaLinux 8 + EPEL 8).
 # Every family you mirror MUST have its signing key imported here or GPG verification fails.
 RUN mkdir -p /etc/pki/rpm-gpg-frozen \
     && curl -fsSL -o /etc/pki/rpm-gpg-frozen/RPM-GPG-KEY-AlmaLinux \
          https://repo.almalinux.org/almalinux/RPM-GPG-KEY-AlmaLinux \
     && curl -fsSL -o /etc/pki/rpm-gpg-frozen/RPM-GPG-KEY-EPEL-8 \
          https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-8 \
-    && curl -fsSL -o /etc/pki/rpm-gpg-frozen/RPM-GPG-KEY-CentOS-7 \
-         https://vault.centos.org/RPM-GPG-KEY-CentOS-7 \
-    && curl -fsSL -o /etc/pki/rpm-gpg-frozen/RPM-GPG-KEY-EPEL-7 \
-         https://dl.fedoraproject.org/pub/epel/RPM-GPG-KEY-EPEL-7 \
     && rpm --import /etc/pki/rpm-gpg-frozen/RPM-GPG-KEY-*
 
 RUN useradd -r -u 1000 -m -d /home/reposync -s /bin/bash reposync \
@@ -56,7 +52,7 @@ RUN chmod +x /app/sync.sh /app/validate_packages.sh
 
 # PKG_LISTS drives validate_packages.sh: space-separated "list_file:os_prefix:repo1,repo2,..."
 # entries (informational, never blocks a sync). Override at runtime for your OS matrix.
-ENV PKG_LISTS="/app/pkg-lists/custom_packages810.txt:rhel810:baseos,appstream,epel /app/pkg-lists/custom_packages79.txt:rhel79:base,updates,epel"
+ENV PKG_LISTS="/app/pkg-lists/custom_packages_alma810.txt:alma810:baseos,appstream,epel"
 
 USER reposync
 WORKDIR /app

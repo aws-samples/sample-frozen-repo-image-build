@@ -160,8 +160,9 @@ resource "aws_kms_alias" "frozen_store" {
 # -----------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "frozen_store" {
-  bucket = var.bucket_name
-  tags   = var.tags
+  bucket        = var.bucket_name
+  force_destroy = var.force_destroy
+  tags          = var.tags
 }
 
 resource "aws_s3_bucket_versioning" "frozen_store" {

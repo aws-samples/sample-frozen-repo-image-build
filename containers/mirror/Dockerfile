@@ -1,12 +1,11 @@
-# Build aws-sigv4-proxy from source: later commits fix URL-encoding of '+' in
-# package names (libstdc++, gcc-c++), which otherwise fail SigV4 with 403.
+# Build aws-sigv4-proxy v1.12 or later from an immutable source commit.
+# v1.12 includes the S3 special-character URL fix from upstream PR #273.
 FROM public.ecr.aws/docker/library/golang:1.26-alpine AS sigv4-build
 RUN apk add --no-cache git ca-certificates
 RUN git clone https://github.com/awslabs/aws-sigv4-proxy.git /src
 WORKDIR /src
-# Pinned to the full 40-char SHA carrying the '+'-in-package-name URL-encoding fix (never a mutable branch).
-# Override: --build-arg SIGV4_PROXY_COMMIT=<full-40-char-sha>
-ARG SIGV4_PROXY_COMMIT=4165dc78f51d8faae974f6d3091d2e1c14bdb4b1
+# Full v1.12 release commit; override only with another reviewed 40-character SHA.
+ARG SIGV4_PROXY_COMMIT=0281c3271e65ca05fbb143a2f8ffbde7eda41179
 RUN git checkout "${SIGV4_PROXY_COMMIT}" \
     && go env -w GOPROXY=direct \
     && CGO_ENABLED=0 GOOS=linux go build -o /aws-sigv4-proxy ./cmd/aws-sigv4-proxy

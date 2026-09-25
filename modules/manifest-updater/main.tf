@@ -17,7 +17,7 @@ data "archive_file" "manifest_updater" {
   output_path = "${path.module}/.build/manifest_updater.zip"
   # Keep interpreter bytecode out of the artifact: __pycache__ appears whenever
   # the source is compiled locally and would churn the source_code_hash.
-  excludes    = ["__pycache__", "__pycache__/**", "**/__pycache__/**", "**/*.pyc"]
+  excludes = ["__pycache__", "__pycache__/**", "**/__pycache__/**", "**/*.pyc"]
 }
 
 # --- IAM role -----------------------------------------------------------------
@@ -145,6 +145,14 @@ resource "aws_lambda_function" "manifest_updater" {
   }
 
   tags = var.tags
+}
+
+# Explicit async policy for EventBridge invocations. With reserved concurrency 1,
+# later task-stop events remain eligible for retry for up to six hours.
+resource "aws_lambda_function_event_invoke_config" "manifest_updater" {
+  function_name                = aws_lambda_function.manifest_updater.function_name
+  maximum_event_age_in_seconds = 21600
+  maximum_retry_attempts       = 2
 }
 
 # --- EventBridge rule: ECS Task State Change ----------------------------------

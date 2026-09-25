@@ -39,11 +39,11 @@ variable "baselines" {
   description = <<-EOT
     Map of patch baselines to create, keyed by an arbitrary baseline_key.
     Each value:
-      operating_system : SSM patch OS (for example REDHAT_ENTERPRISE_LINUX, AMAZON_LINUX_2).
+      operating_system : SSM patch OS (for example ALMA_LINUX, REDHAT_ENTERPRISE_LINUX).
       patch_group      : value written to the Patch Group tag and targeted by associations.
       sources          : list of yum repo sources, each:
         name         : repo id / section name.
-        product      : SSM patch source product (for example RedhatEnterpriseLinux8.10).
+        product      : exact SSM patch source product (for example AlmaLinux8.10).
         baseurl_path : path appended under var.mirror_url to form baseurl.
         gpgkey_file  : gpg key filename under /etc/pki/rpm-gpg/.
   EOT
@@ -62,50 +62,26 @@ variable "baselines" {
   # <os_prefix>/<component>, gpg key filenames match os_matrix.gpg_keys). The
   # Terragrunt layer overrides this with config.hcl patch_baselines.
   default = {
-    rhel810 = {
-      operating_system = "REDHAT_ENTERPRISE_LINUX"
-      patch_group      = "rhel810"
+    alma810 = {
+      operating_system = "ALMA_LINUX"
+      patch_group      = "alma810"
       sources = [
         {
           name         = "frozen-baseos"
-          product      = "RedhatEnterpriseLinux8.10"
-          baseurl_path = "rhel810/baseos"
+          product      = "AlmaLinux8.10"
+          baseurl_path = "alma810/baseos"
           gpgkey_file  = "RPM-GPG-KEY-OS"
         },
         {
           name         = "frozen-appstream"
-          product      = "RedhatEnterpriseLinux8.10"
-          baseurl_path = "rhel810/appstream"
+          product      = "AlmaLinux8.10"
+          baseurl_path = "alma810/appstream"
           gpgkey_file  = "RPM-GPG-KEY-OS"
         },
         {
           name         = "frozen-epel"
-          product      = "RedhatEnterpriseLinux8.10"
-          baseurl_path = "rhel810/epel"
-          gpgkey_file  = "RPM-GPG-KEY-EPEL"
-        },
-      ]
-    }
-    rhel79 = {
-      operating_system = "REDHAT_ENTERPRISE_LINUX"
-      patch_group      = "rhel79"
-      sources = [
-        {
-          name         = "frozen-base"
-          product      = "RedhatEnterpriseLinux7.9"
-          baseurl_path = "rhel79/base"
-          gpgkey_file  = "RPM-GPG-KEY-OS"
-        },
-        {
-          name         = "frozen-updates"
-          product      = "RedhatEnterpriseLinux7.9"
-          baseurl_path = "rhel79/updates"
-          gpgkey_file  = "RPM-GPG-KEY-OS"
-        },
-        {
-          name         = "frozen-epel"
-          product      = "RedhatEnterpriseLinux7.9"
-          baseurl_path = "rhel79/epel"
+          product      = "AlmaLinux8.10"
+          baseurl_path = "alma810/epel"
           gpgkey_file  = "RPM-GPG-KEY-EPEL"
         },
       ]

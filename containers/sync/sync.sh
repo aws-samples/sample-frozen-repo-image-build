@@ -75,13 +75,13 @@ verify_gpg() {
   result=$(rpm -K "$rpm_file" 2>&1)
   if echo "$result" | grep -q "digests signatures OK"; then
     return 0
-  elif echo "$result" | grep -q "digests OK"; then
-    return 0
-  else
-    FAILED_RPMS="${FAILED_RPMS}\n  ${rpm_file}: ${result}"
-    TOTAL_FAILED=$((TOTAL_FAILED + 1))
-    return 1
   fi
+
+  # A digest proves file integrity, not signer identity. Reject unsigned RPMs,
+  # unknown signing keys, and every other result that lacks a valid signature.
+  FAILED_RPMS="${FAILED_RPMS}\n  ${rpm_file}: ${result}"
+  TOTAL_FAILED=$((TOTAL_FAILED + 1))
+  return 1
 }
 
 sync_repo() {
@@ -101,7 +101,10 @@ sync_repo() {
   echo "=== Syncing ${os_prefix}/${repo_id} (arch: ${arch_filter}) ==="
 
   local local_dir="${SYNC_DIR}/${os_prefix}/${repo_id}"
-  mkdir -p "${local_dir}" "${SYNC_DIR}/repos.d"
+  if ! mkdir -p "${local_dir}" "${SYNC_DIR}/repos.d"; then
+    echo "  ERROR: Could not create working directories for ${os_prefix}/${repo_id}"
+    return 1
+  fi
 
   cat > ${SYNC_DIR}/repos.d/frozen-sync-${os_prefix}-${repo_id}.repo <<EOF
 [frozen-sync-${os_prefix}-${repo_id}]
@@ -150,26 +153,41 @@ EOF
   rm -f /tmp/rpm_list.txt
 
   echo "  GPG results: ${verified} verified, ${rejected} rejected"
+  if [[ $rejected -gt 0 ]]; then
+    echo "  ERROR: ${rejected} RPM(s) failed signature verification for ${os_prefix}/${repo_id}; refusing partial promotion"
+    return 1
+  fi
   if [[ $verified -eq 0 ]]; then
-    echo "  ERROR: All RPMs failed GPG for ${os_prefix}/${repo_id}, skipping to protect production"
+    echo "  ERROR: No RPM passed signature verification for ${os_prefix}/${repo_id}"
     return 1
   fi
 
   echo "  Generating repodata..."
-  createrepo_c "${local_dir}" --update 2>&1 | tail -3
+  if ! createrepo_c "${local_dir}" --update 2>&1 | tail -3; then
+    echo "  ERROR: createrepo_c failed for ${os_prefix}/${repo_id}; refusing promotion"
+    return 1
+  fi
 
   echo "  Uploading to staging..."
-  aws s3 sync "${local_dir}/" "s3://${S3_BUCKET}/staging/${os_prefix}/${repo_id}/" \
-    --region "${S3_REGION}" --storage-class INTELLIGENT_TIERING --only-show-errors
+  if ! aws s3 sync "${local_dir}/" "s3://${S3_BUCKET}/staging/${os_prefix}/${repo_id}/" \
+      --region "${S3_REGION}" --storage-class INTELLIGENT_TIERING --only-show-errors; then
+    echo "  ERROR: Staging upload failed for ${os_prefix}/${repo_id}; refusing promotion"
+    return 1
+  fi
 
   echo "  Promoting staging to production..."
-  aws s3 sync "s3://${S3_BUCKET}/staging/${os_prefix}/${repo_id}/" \
-    "s3://${S3_BUCKET}/${os_prefix}/${repo_id}/" \
-    --region "${S3_REGION}" --storage-class INTELLIGENT_TIERING --delete --only-show-errors
+  if ! aws s3 sync "s3://${S3_BUCKET}/staging/${os_prefix}/${repo_id}/" \
+      "s3://${S3_BUCKET}/${os_prefix}/${repo_id}/" \
+      --region "${S3_REGION}" --storage-class INTELLIGENT_TIERING --delete --only-show-errors; then
+    echo "  ERROR: Production promotion failed for ${os_prefix}/${repo_id}"
+    return 1
+  fi
 
   echo "  Cleaning up staging..."
-  aws s3 rm "s3://${S3_BUCKET}/staging/${os_prefix}/${repo_id}/" \
-    --region "${S3_REGION}" --recursive --only-show-errors
+  if ! aws s3 rm "s3://${S3_BUCKET}/staging/${os_prefix}/${repo_id}/" \
+      --region "${S3_REGION}" --recursive --only-show-errors; then
+    echo "  WARN: Could not remove staging objects for ${os_prefix}/${repo_id}"
+  fi
 
   TOTAL_SYNCED=$((TOTAL_SYNCED + rpm_count - rejected))
   echo "  Done: ${os_prefix}/${repo_id}"
@@ -200,8 +218,9 @@ for osp in sorted(m):
 
   if [[ $sync_errors -gt 0 ]]; then
     echo ""
-    echo "  WARNING: ${sync_errors} repo(s) failed to sync"
+    echo "  ERROR: ${sync_errors} repo(s) failed to sync; full sync is incomplete"
     TOTAL_FAILED=$((TOTAL_FAILED + sync_errors))
+    return 1
   fi
 }
 
@@ -210,12 +229,12 @@ selective_sync() {
   echo "=== SELECTIVE SYNC (REQUEST_ID: ${REQUEST_ID}) ==="
 
   local approved_file="/tmp/approved.json"
+  local selective_errors=0
   echo "  Fetching approved package list from S3..."
   if ! aws s3 cp "s3://${S3_BUCKET}/requests/${REQUEST_ID}/approved.json" "${approved_file}" \
       --region "${S3_REGION}" 2>/dev/null; then
-    echo "  ERROR: Could not fetch approved list. Falling back to full sync..."
-    full_sync
-    return $?
+    echo "  ERROR: Could not fetch approved package list; refusing to sync without an approval artifact"
+    return 1
   fi
 
   local approved_count
@@ -256,7 +275,8 @@ repos = json.loads(os.environ.get('UPSTREAM_REPOS_MAP', '{}'))
 print(repos.get('${os_prefix}', {}).get('${repo_id}', ''))
 " 2>/dev/null)
     if [[ -z "$repo_url" ]]; then
-      echo "  ERROR: No upstream URL for ${os_prefix}/${repo_id}, skipping"
+      echo "  ERROR: No upstream URL for ${os_prefix}/${repo_id}"
+      selective_errors=$((selective_errors + 1))
       continue
     fi
 
@@ -269,14 +289,18 @@ enabled=1
 gpgcheck=0
 EOF
 
+    local download_errors=0
     while IFS= read -r nevra; do
-      dnf download \
+      if ! dnf download \
         --repoid="selective-${os_prefix}-${repo_id}" \
         --setopt=reposdir="${SYNC_DIR}/repos.d" \
         --setopt=cachedir="${SYNC_DIR}/cache" \
         --arch="${arch_filter}" \
         --downloaddir="${work_dir}/" \
-        "${nevra}" 2>&1 | tail -2 || echo "    WARN: Failed to download ${nevra}"
+        "${nevra}" 2>&1 | tail -2; then
+        echo "    ERROR: Failed to download approved package ${nevra}"
+        download_errors=$((download_errors + 1))
+      fi
     done < <(python3 -c "
 import json
 by_repo = json.load(open('/tmp/approved_by_repo.json'))
@@ -284,21 +308,40 @@ for nevra in by_repo.get('${os_prefix}/${repo_id}', []):
     print(nevra)
 ")
 
+    if [[ $download_errors -gt 0 ]]; then
+      echo "  ERROR: ${download_errors} approved package(s) failed to download for ${os_prefix}/${repo_id}; refusing partial update"
+      selective_errors=$((selective_errors + 1))
+      rm -f "${SYNC_DIR}/repos.d/selective-${os_prefix}-${repo_id}.repo"
+      rm -rf "${work_dir}"
+      continue
+    fi
+
     local verified=0
+    local rejected=0
     find "${work_dir}" -name "*.rpm" > /tmp/sel_rpms.txt || true
     while read -r rpm; do
-      if verify_gpg "$rpm"; then verified=$((verified + 1)); else rm -f "$rpm"; fi
+      if verify_gpg "$rpm"; then
+        verified=$((verified + 1))
+      else
+        rm -f "$rpm"
+        rejected=$((rejected + 1))
+      fi
     done < /tmp/sel_rpms.txt
     rm -f /tmp/sel_rpms.txt
-    if [[ $verified -eq 0 ]]; then
-      echo "  ERROR: All RPMs failed GPG for ${os_prefix}/${repo_id}, skipping"
+    if [[ $rejected -gt 0 || $verified -eq 0 ]]; then
+      echo "  ERROR: Signature verification failed for ${os_prefix}/${repo_id} (${verified} verified, ${rejected} rejected); refusing partial update"
+      selective_errors=$((selective_errors + 1))
       rm -f "${SYNC_DIR}/repos.d/selective-${os_prefix}-${repo_id}.repo"
+      rm -rf "${work_dir}"
       continue
     fi
 
     # Additive upload (NO --delete on Packages/).
-    aws s3 sync "${work_dir}/" "s3://${S3_BUCKET}/${os_prefix}/${repo_id}/Packages/" \
-      --region "${S3_REGION}" --storage-class INTELLIGENT_TIERING --only-show-errors
+    if ! aws s3 sync "${work_dir}/" "s3://${S3_BUCKET}/${os_prefix}/${repo_id}/Packages/" \
+        --region "${S3_REGION}" --storage-class INTELLIGENT_TIERING --only-show-errors; then
+      echo "  ERROR: Package upload failed for ${os_prefix}/${repo_id}"
+      return 1
+    fi
 
     # Merge new repodata into the existing production repodata.
     local new_dir="/tmp/rd_new/${os_prefix}/${repo_id}"
@@ -306,17 +349,31 @@ for nevra in by_repo.get('${os_prefix}/${repo_id}', []):
     local merged_dir="/tmp/rd_merged/${os_prefix}/${repo_id}"
     mkdir -p "${new_dir}/Packages" "${old_dir}" "${merged_dir}"
     cp "${work_dir}"/*.rpm "${new_dir}/Packages/" 2>/dev/null || true
-    createrepo_c "${new_dir}" 2>&1 | tail -3 || true
-    aws s3 sync "s3://${S3_BUCKET}/${os_prefix}/${repo_id}/repodata/" "${old_dir}/repodata/" \
-      --region "${S3_REGION}" --only-show-errors 2>/dev/null || true
-    if [[ -d "${old_dir}/repodata" ]] && [[ -d "${new_dir}/repodata" ]]; then
-      mergerepo_c --repo "${old_dir}" --repo "${new_dir}" -o "${merged_dir}" 2>&1 | tail -3 || true
-    else
-      cp -r "${new_dir}/repodata" "${merged_dir}/repodata" 2>/dev/null || true
+    if ! createrepo_c "${new_dir}" 2>&1 | tail -3; then
+      echo "  ERROR: createrepo_c failed for approved packages in ${os_prefix}/${repo_id}"
+      return 1
     fi
-    if [[ -d "${merged_dir}/repodata" ]]; then
-      aws s3 sync "${merged_dir}/repodata/" "s3://${S3_BUCKET}/${os_prefix}/${repo_id}/repodata/" \
-        --region "${S3_REGION}" --storage-class INTELLIGENT_TIERING --delete --only-show-errors || true
+    if ! aws s3 sync "s3://${S3_BUCKET}/${os_prefix}/${repo_id}/repodata/" "${old_dir}/repodata/" \
+        --region "${S3_REGION}" --only-show-errors; then
+      echo "  ERROR: Could not download existing repodata for ${os_prefix}/${repo_id}"
+      return 1
+    fi
+    if [[ ! -d "${old_dir}/repodata" || ! -d "${new_dir}/repodata" ]]; then
+      echo "  ERROR: Existing or new repository metadata is missing for ${os_prefix}/${repo_id}"
+      return 1
+    fi
+    if ! mergerepo_c --repo "${old_dir}" --repo "${new_dir}" -o "${merged_dir}" 2>&1 | tail -3; then
+      echo "  ERROR: mergerepo_c failed for ${os_prefix}/${repo_id}"
+      return 1
+    fi
+    if [[ ! -d "${merged_dir}/repodata" ]]; then
+      echo "  ERROR: Metadata merge produced no repodata for ${os_prefix}/${repo_id}"
+      return 1
+    fi
+    if ! aws s3 sync "${merged_dir}/repodata/" "s3://${S3_BUCKET}/${os_prefix}/${repo_id}/repodata/" \
+        --region "${S3_REGION}" --storage-class INTELLIGENT_TIERING --delete --only-show-errors; then
+      echo "  ERROR: Repodata promotion failed for ${os_prefix}/${repo_id}"
+      return 1
     fi
     rm -rf "${new_dir}" "${old_dir}" "${merged_dir}"
     TOTAL_SYNCED=$((TOTAL_SYNCED + verified))
@@ -330,10 +387,20 @@ for k in sorted(by_repo.keys()):
 ")
 
   rm -f "${approved_file}" /tmp/approved_by_repo.json
+
+  if [[ $selective_errors -gt 0 ]]; then
+    echo "  ERROR: ${selective_errors} repository update(s) failed; selective sync is incomplete"
+    TOTAL_FAILED=$((TOTAL_FAILED + selective_errors))
+    return 1
+  fi
 }
 
 main() {
   if [[ "${FULL_SYNC:-}" == "true" ]]; then
+    if [[ "${BASELINE_APPROVED:-}" != "true" ]]; then
+      echo "ERROR: FULL_SYNC requires BASELINE_APPROVED=true to acknowledge the operator-authorized initial baseline"
+      exit 1
+    fi
     full_sync
   elif [[ -n "${REQUEST_ID:-}" ]]; then
     selective_sync
@@ -352,6 +419,7 @@ main() {
   echo "  Total GPG rejected: ${TOTAL_FAILED}"
   if [[ $TOTAL_FAILED -gt 0 ]]; then
     echo -e "  REJECTED RPMs:${FAILED_RPMS}"
+    exit 1
   fi
 }
 

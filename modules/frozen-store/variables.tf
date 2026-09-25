@@ -22,9 +22,14 @@ variable "repo_matrix" {
   type        = map(list(string))
 
   default = {
-    rhel810 = ["baseos", "appstream", "epel"]
-    rhel79  = ["base", "updates", "epel"]
+    alma810 = ["baseos", "appstream", "epel"]
   }
+}
+
+variable "force_destroy" {
+  description = "Whether Terraform may delete all object versions and delete markers when destroying the frozen store. Keep false during normal operation."
+  type        = bool
+  default     = false
 }
 
 variable "tags" {

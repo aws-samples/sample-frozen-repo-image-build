@@ -38,8 +38,9 @@ inputs = {
   dynamodb_table_arn   = dependency.control_plane.outputs.dynamodb_table_arn
   dynamodb_kms_key_arn = dependency.control_plane.outputs.dynamodb_kms_key_arn
 
-  vpc_id     = include.root.locals.cfg.distribution_vpc_id
-  subnet_ids = include.root.locals.cfg.distribution_subnet_ids
+  vpc_id           = include.root.locals.cfg.distribution_vpc_id
+  subnet_ids       = include.root.locals.cfg.distribution_subnet_ids
+  ecr_force_delete = include.root.locals.cfg.sync_ecr_force_delete
 
   # OS matrix (single source of truth in config.hcl).
   upstream_repos_map = include.root.locals.cfg.upstream_repos
